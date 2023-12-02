@@ -1,0 +1,6 @@
+@FileRenamer.Api_HostAddress = http://localhost:5114
+
+GET {{FileRenamer.Api_HostAddress}}/renamefiles/
+Accept: application/json
+
+###
