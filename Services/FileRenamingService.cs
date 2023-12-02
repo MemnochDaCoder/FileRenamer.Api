@@ -23,6 +23,11 @@ namespace FileRenamer.Api.Services
 
             try
             {
+                if (!Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
+                {
+                    _logger.LogError($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
+                    throw new DirectoryNotFoundException($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
+                }
                 var files = Directory.GetFiles(task.SourceDirectory)
                     .Where(file => allowedExtensions.Contains(Path.GetExtension(file)))
                     .ToList();
