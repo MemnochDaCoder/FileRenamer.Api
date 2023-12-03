@@ -22,4 +22,10 @@
 		<PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="6.5.0" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <None Include=".docker\.dockerignore" />
+	  <None Include=".docker\docker-compose.yml" />
+	  <None Include=".docker\Dockerfile" />
+	</ItemGroup>
+
 </Project>
