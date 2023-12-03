@@ -21,17 +21,14 @@ namespace FileRenamer.Api.Services
             var proposedChanges = new List<ProposedChangeModel>();
             var allowedExtensions = new[] { ".mp4", ".mkv", ".avi" };
 
-            var sourceDirectory = ConvertWindowsPathToUnix(task.SourceDirectory);//task.SourceDirectory.Replace("F:\\", "/mnt/f/").Replace("M:\\", "/mnt/m/").Replace("T:\\", "/mnt/t/").Replace("\\", "/");
-            var destinationDirectory = ConvertWindowsPathToUnix(task.DestinationDirectory);//task.DestinationDirectory.Replace("F:\\", "/mnt/f/").Replace("M:\\", "/mnt/m/").Replace("T:\\", "/mnt/t/").Replace("\\", "/");
-
             try
             {
-                if (Directory.Exists(sourceDirectory) && !Directory.Exists(destinationDirectory))
+                if (Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
                 {
                     _logger.LogError($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                     throw new DirectoryNotFoundException($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                 }
-                var files = Directory.GetFiles(sourceDirectory)
+                var files = Directory.GetFiles(task.SourceDirectory)
                     .Where(file => allowedExtensions.Contains(Path.GetExtension(file)))
                     .ToList();
 
