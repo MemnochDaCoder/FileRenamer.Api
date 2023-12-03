@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  file-renamer-api:
+    image: file-renamer-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # Map the container's port 8080 to port 8080 on the host
+      - "8081:8081"  # Map the container's port 8081 to port 8081 on the host
+    volumes:
+      - "F:/:/mnt/f"  # Mount the F drive
+      - "M:/:/mnt/m"  # Mount the M drive
+      - "T:/:/mnt/t"  # Mount the T drive
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    restart: on-failure

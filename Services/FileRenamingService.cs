@@ -21,14 +21,17 @@ namespace FileRenamer.Api.Services
             var proposedChanges = new List<ProposedChangeModel>();
             var allowedExtensions = new[] { ".mp4", ".mkv", ".avi" };
 
+            var sourceDirectory = ConvertWindowsPathToUnix(task.SourceDirectory);//task.SourceDirectory.Replace("F:\\", "/mnt/f/").Replace("M:\\", "/mnt/m/").Replace("T:\\", "/mnt/t/").Replace("\\", "/");
+            var destinationDirectory = ConvertWindowsPathToUnix(task.DestinationDirectory);//task.DestinationDirectory.Replace("F:\\", "/mnt/f/").Replace("M:\\", "/mnt/m/").Replace("T:\\", "/mnt/t/").Replace("\\", "/");
+
             try
             {
-                if (!Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
+                if (Directory.Exists(sourceDirectory) && !Directory.Exists(destinationDirectory))
                 {
                     _logger.LogError($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                     throw new DirectoryNotFoundException($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                 }
-                var files = Directory.GetFiles(task.SourceDirectory)
+                var files = Directory.GetFiles(sourceDirectory)
                     .Where(file => allowedExtensions.Contains(Path.GetExtension(file)))
                     .ToList();
 
@@ -107,22 +110,6 @@ namespace FileRenamer.Api.Services
                                 }
                             }
                         }
-                    }
-                    else
-                    {
-                        var deconstructedFileName = fileName.Split(' ');
-                        var se = deconstructedFileName[5].Split("x");
-                        var name = FormatCustomAddams(fileName, se[0], se[1]);
-                        //The Addams Family (1964) — 1x01 — The Addams Family Goes to School
-                        proposedChanges.Add(new ProposedChangeModel
-                        {
-                            OriginalFilePath = task.SourceDirectory,
-                            OriginalFileName = fileName,
-                            ProposedFileName = name,
-                            FileType = deconstructedFileName[deconstructedFileName.Length - 1],
-                            Season = se[0],
-                            Episode = se[1]
-                        });
                     }
                 }
                 return proposedChanges;
@@ -216,15 +203,21 @@ namespace FileRenamer.Api.Services
 
         }
 
-        private static string FormatCustomAddams(string fileName, string season, string episode)
+        private string ConvertWindowsPathToUnix(string windowsPath)
         {
-            var parts = fileName.Split(' ');
-            var episodeName = "";
-            for (int i = 7; i < parts.Length; i++)
+            if (windowsPath.StartsWith("F:\\"))
             {
-                episodeName += $" {parts[i]}";
+                return "/mnt/f" + windowsPath.Substring(2).Replace("\\", "/");
             }
-            return $"{parts[0]} {parts[1]} {parts[2]} S0{season}E{episode} {episodeName}";
+            if (windowsPath.StartsWith("M:\\"))
+            {
+                return "/mnt/m" + windowsPath.Substring(2).Replace("\\", "/");
+            }
+            if (windowsPath.StartsWith("T:\\"))
+            {
+                return "/mnt/t" + windowsPath.Substring(2).Replace("\\", "/");
+            }
+            return windowsPath; // Return the original path if it doesn't match any condition
         }
     }
 }
