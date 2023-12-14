@@ -2,6 +2,8 @@
 using System.Text;
 using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Utils;
+using FileRenamer.Api.Models;
+using System.Net.Http.Headers;
 
 namespace FileRenamer.Api.Services
 {
@@ -49,10 +51,24 @@ namespace FileRenamer.Api.Services
             throw new Exception("Failed to authenticate.");
         }
 
-        public async File GetSubs(string title)
+        public async Task<SubtitleSearchResult> SearchSubtitlesAsync(string title)
         {
             if (token == null)
                 await GetToken();
+
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var response = await _httpClient.GetAsync($"https://api.opensubtitles.com/api/v1/subtitles?language=english&moviehash={HashFile(title)}");
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError($"Error getting the subtitles: {response.StatusCode}");
+                throw new Exception($"Error getting the subtitles: {response.StatusCode}");
+            }
+
+            // Parse the response
+            var content = await response.Content.ReadAsStringAsync();
+            var searchResult = JsonConvert.DeserializeObject<SubtitleSearchResult>(content);
+
+            return searchResult!;
         }
 
         private string HashFile(string name)

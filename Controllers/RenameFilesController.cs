@@ -11,11 +11,13 @@ namespace FileRenamer.Api.Controllers
     {
         private readonly ILogger<RenameFilesController> _logger;
         private readonly IFileRenamingService _fileRenamingService;
+        private readonly IOpenSubtitlesService _openSubtitlesService;
 
-        public RenameFilesController(ILogger<RenameFilesController> logger, IFileRenamingService fileRenamingService)
+        public RenameFilesController(ILogger<RenameFilesController> logger, IFileRenamingService fileRenamingService, IOpenSubtitlesService openSubtitlesService)
         {
             _logger = logger;
             _fileRenamingService = fileRenamingService;
+            _openSubtitlesService = openSubtitlesService;
         }
 
         /// <summary>
@@ -97,6 +99,33 @@ namespace FileRenamer.Api.Controllers
                 _logger.LogError(ex.Message, ex);
                 return StatusCode(500, ex.ToString());
             }
+        }
+
+        /// <summary>
+        /// Retrieves subtitle file(s).
+        /// </summary>
+        /// <param name="title">Show/movie title.</param>
+        /// <returns>An ActionResult indicating the success or failure of the operation.</returns>
+        /// <response code="200">If the retrival operation is successful.</response>
+        /// <response code="400">If the input is null or invalid.</response>
+        /// <response code="500">If an error occurs during the retrival operation.</response>
+        [HttpPost("GetSubs")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public IActionResult GetSubtitles(string title)
+        {
+            if(string.IsNullOrEmpty(title))
+            {
+                _logger.LogError("Title cannot be null or empty.");
+                return BadRequest("Title cannot be null or empty.");
+            }
+
+            var result = _openSubtitlesService.SearchSubtitlesAsync(title);
+
+            if (result.IsCompletedSuccessfully)
+                return Ok(result.Result);
+
+            return BadRequest(result.Result);
         }
     }
 }
