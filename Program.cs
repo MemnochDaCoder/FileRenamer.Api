@@ -17,6 +17,7 @@ builder.Services.AddControllers();
 
 builder.Services.AddScoped<IFileRenamingService, FileRenamingService>();
 builder.Services.AddScoped<ITvDbService, TvDbService>();
+builder.Services.AddScoped<IOpenSubtitlesService, OpenSubtitlesService>();
 
 builder.Services.AddLogging();
 builder.Services.AddHttpClient();

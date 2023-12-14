@@ -80,7 +80,6 @@ namespace FileRenamer.Api.Services
 
         public async Task<MovieDetailModel> GetMovieDetailsAsync(int id)
         {
-            _logger.LogInformation($"Started a movie search: {id}");
             if (token == null)
                 await GetToken();
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

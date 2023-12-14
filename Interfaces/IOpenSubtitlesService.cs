@@ -2,5 +2,6 @@
 {
     public interface IOpenSubtitlesService
     {
+        Task<string> GetToken();>
     }
 }
