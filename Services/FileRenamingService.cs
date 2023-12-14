@@ -2,6 +2,7 @@
 using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Models;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace FileRenamer.Api.Services
 {
@@ -23,7 +24,7 @@ namespace FileRenamer.Api.Services
 
             try
             {
-                if (Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
+                if (!Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
                 {
                     _logger.LogError($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                     throw new DirectoryNotFoundException($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
@@ -35,7 +36,14 @@ namespace FileRenamer.Api.Services
                 foreach (var file in files)
                 {
                     var fileName = Path.GetFileName(file);
-                    var formattedFileName = FormatMovieFileName(fileName);
+
+                    if(fileName.Contains("House MD"))
+                    {
+                        proposedChanges.Add(FormatHouse(fileName, task.SourceDirectory, task.DestinationDirectory));
+                        continue;
+                    }
+
+                    var formattedFileName = FormatFileName(fileName);
 
                     if (formattedFileName != null)
                     {
@@ -128,17 +136,35 @@ namespace FileRenamer.Api.Services
                 {
                     if (allowedExtensions.Contains(Path.GetExtension(change.OriginalFileName))) // Checking file extension before renaming
                     {
-                        var oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
-                        var sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
-                        var newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName + Path.GetExtension(change.OriginalFileName));
+                        var oldPath = "";
+                        var sanitizedNewFileName = "";
+                        var newPath = "";
+                        if (!change.OriginalFileName.Contains("House"))
+                        {
+                            oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
+                            sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
+                            newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName + Path.GetExtension(change.OriginalFileName));
+                        }
+                        else
+                        {
+                            oldPath = change.OriginalFilePath;
+                            sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
+                            newPath = Path.Combine(change.NewFilePath);
+                        }
 
                         if (File.Exists(newPath))
                         {
                             _logger.LogWarning($"File with the name {sanitizedNewFileName} already exists. Skipping renaming of {change.OriginalFileName}.");
                             continue;
                         }
-
-                        File.Move(oldPath, newPath);
+                        if (File.Exists(oldPath))
+                        {
+                            File.Move(oldPath, newPath);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"File not found: {oldPath}");
+                        }
                     }
                 }
 
@@ -161,12 +187,8 @@ namespace FileRenamer.Api.Services
             return invalidCharsRemoved.Trim();
         }
 
-        private static string FormatMovieFileName(string fileName)
+        private static string FormatFileName(string fileName)
         {
-            if (fileName.Contains("The Addams Family"))
-            {
-                return null!;
-            }
             var parts = fileName.Split('.');
 
             // Finding the index of the part that is a year (assuming the year is between 1900 and 2099)
@@ -197,24 +219,33 @@ namespace FileRenamer.Api.Services
                 //var title = parts[0].Split();
                 //return $"{title[0]} {title[1]}";
             }
-
         }
 
-        private string ConvertWindowsPathToUnix(string windowsPath)
+        private static ProposedChangeModel FormatHouse(string fileName, string originalPath, string sourceDirectory)
         {
-            if (windowsPath.StartsWith("F:\\"))
+            var parts = fileName.Split(' ');
+            var season = parts[3].Length > 1 ? parts[3] : "0" + parts[3];
+            string episodeName = string.Empty;
+
+            if (parts.Length > 7)
             {
-                return "/mnt/f" + windowsPath.Substring(2).Replace("\\", "/");
+                for(int i = 0; i < parts.Length; ++i)
+                {
+                    if(i > 6)
+                    {
+                        episodeName += parts[i];
+                    }
+                }
             }
-            if (windowsPath.StartsWith("M:\\"))
+            return new ProposedChangeModel
             {
-                return "/mnt/m" + windowsPath.Substring(2).Replace("\\", "/");
-            }
-            if (windowsPath.StartsWith("T:\\"))
-            {
-                return "/mnt/t" + windowsPath.Substring(2).Replace("\\", "/");
-            }
-            return windowsPath; // Return the original path if it doesn't match any condition
+                OriginalFilePath = sourceDirectory,
+                OriginalFileName = fileName,
+                ProposedFileName = $"{parts[0]} {parts[1]} S{season}E{parts[5]} {episodeName}",
+                FileType = Path.GetExtension(fileName),
+                Season = season.ToString(),
+                Episode = episodeName
+            };
         }
     }
 }
