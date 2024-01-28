@@ -1,7 +1,6 @@
 using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Models;
 using Microsoft.AspNetCore.Mvc;
-using Swashbuckle.AspNetCore.Annotations;
 
 namespace FileRenamer.Api.Controllers
 {
@@ -101,31 +100,31 @@ namespace FileRenamer.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// Retrieves subtitle file(s).
-        /// </summary>
-        /// <param name="title">Show/movie title.</param>
-        /// <returns>An ActionResult indicating the success or failure of the operation.</returns>
-        /// <response code="200">If the retrival operation is successful.</response>
-        /// <response code="400">If the input is null or invalid.</response>
-        /// <response code="500">If an error occurs during the retrival operation.</response>
-        [HttpPost("GetSubs")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public IActionResult GetSubtitles(string title)
-        {
-            if(string.IsNullOrEmpty(title))
-            {
-                _logger.LogError("Title cannot be null or empty.");
-                return BadRequest("Title cannot be null or empty.");
-            }
+        ///// <summary>
+        ///// Retrieves subtitle file(s).
+        ///// </summary>
+        ///// <param name="title">Show/movie title.</param>
+        ///// <returns>An ActionResult indicating the success or failure of the operation.</returns>
+        ///// <response code="200">If the retrival operation is successful.</response>
+        ///// <response code="400">If the input is null or invalid.</response>
+        ///// <response code="500">If an error occurs during the retrival operation.</response>
+        //[HttpPost("GetSubs")]
+        //[ProducesResponseType(StatusCodes.Status200OK)]
+        //[ProducesResponseType(StatusCodes.Status400BadRequest)]
+        //public IActionResult GetSubtitles(string title)
+        //{
+        //    if(string.IsNullOrEmpty(title))
+        //    {
+        //        _logger.LogError("Title cannot be null or empty.");
+        //        return BadRequest("Title cannot be null or empty.");
+        //    }
 
-            var result = _openSubtitlesService.SearchSubtitlesAsync(title);
+        //    var result = _openSubtitlesService.SearchSubtitlesAsync(title);
 
-            if (result.IsCompletedSuccessfully)
-                return Ok(result.Result);
+        //    if (result.IsCompletedSuccessfully)
+        //        return Ok(result.Result);
 
-            return BadRequest(result.Result);
-        }
+        //    return BadRequest(result.Result);
+        //}
     }
 }

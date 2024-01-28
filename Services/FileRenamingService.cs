@@ -1,19 +1,21 @@
 ﻿
 using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Models;
+using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace FileRenamer.Api.Services
 {
     public class FileRenamingService : IFileRenamingService
     {
         private readonly ITvDbService _tvDbService;
+        private readonly IOpenSubtitlesService _openSubtitlesService;
         private readonly ILogger _logger;
 
-        public FileRenamingService(ITvDbService tvDbService, ILogger<FileRenamingService> logger)
+        public FileRenamingService(ITvDbService tvDbService, IOpenSubtitlesService openSubtitlesService, ILogger<FileRenamingService> logger)
         {
             _tvDbService = tvDbService;
+            _openSubtitlesService = openSubtitlesService;
             _logger = logger;
         }
 
@@ -37,12 +39,6 @@ namespace FileRenamer.Api.Services
                 {
                     var fileName = Path.GetFileName(file);
 
-                    if(fileName.Contains("House MD"))
-                    {
-                        proposedChanges.Add(FormatHouse(fileName, task.SourceDirectory, task.DestinationDirectory));
-                        continue;
-                    }
-
                     var formattedFileName = FormatFileName(fileName);
 
                     if (formattedFileName != null)
@@ -57,7 +53,7 @@ namespace FileRenamer.Api.Services
 
                         var apiData = await _tvDbService.SearchShowsOrMoviesAsync(formattedFileName);
 
-                        if (apiData != null)
+                        if (apiData != null && apiData.Data != null && apiData.Data.Count > 0)
                         {
                             if (files.Count == 0)
                             {
@@ -84,7 +80,7 @@ namespace FileRenamer.Api.Services
                                 //Shows
                                 _logger.LogInformation("Started renaming episode.");
 
-                                var pattern = @"S(\d{2})E(\d{2}) | (\d{1})x(\d{2})";
+                                var pattern = @"S(\d{2})E(\d{2})|(\d{1})x(\d{2})";
                                 Match match = Regex.Match(deconstructedFileName[1], pattern);
 
                                 string? filePath = null;
@@ -92,6 +88,10 @@ namespace FileRenamer.Api.Services
                                 foreach (var d in deconstructedFileName.Select((value, i) => new { i, value }))
                                 {
                                     filePath += d.i != deconstructedFileName.Length ? $" {d.value}" : "";
+                                    if (!match.Success)
+                                    {
+                                        match = Regex.Match(d.value, pattern);
+                                    }
                                 }
 
                                 if (match.Success)
@@ -101,19 +101,34 @@ namespace FileRenamer.Api.Services
                                     var episodeDetail = await _tvDbService.GetEpisodeDetailsAsync(int.Parse(apiData.Data[0].Id), season.ToString(), episode.ToString());
                                     var ss = episodeDetail.Data.Episodes[0].SeasonNumber.ToString().Length == 1 ? "S0" : "S";
                                     var ee = episodeDetail.Data.Episodes[0].Number.ToString().Length == 1 ? "E0" : "E";
-                                    var test = $"{episodeDetail.Data.Series.Name} {ss}{episodeDetail.Data.Episodes[0].SeasonNumber}{ee}{episodeDetail.Data.Episodes[0].Number} {episodeDetail.Data.Episodes[0].Name}";
+                                    var proposedFileName = SanitizeFileName($"{episodeDetail.Data.Series.Name} {ss + episodeDetail.Data.Episodes[0].SeasonNumber}{ee + episodeDetail.Data.Episodes[0].Number} {episodeDetail.Data.Episodes[0].Name}");
 
                                     proposedChanges.Add(new ProposedChangeModel
                                     {
                                         OriginalFilePath = task.SourceDirectory,
                                         OriginalFileName = fileName,
-                                        ProposedFileName = SanitizeFileName($"{episodeDetail.Data.Series.Name} {ss + episodeDetail.Data.Episodes[0].SeasonNumber}{ee + episodeDetail.Data.Episodes[0].Number} {episodeDetail.Data.Episodes[0].Name}"),
+                                        ProposedFileName = proposedFileName,
                                         FileType = deconstructedFileName[deconstructedFileName.Length - 1],
                                         Season = season.ToString(),
                                         Episode = episode.ToString()
                                     });
                                 }
+                                else
+                                {
+                                    _logger.LogError("No match was found using the regex for season and episode.");
+                                    throw new Exception("No match was found using the regex for season and episode.");
+                                }
                             }
+                        }
+                        else
+                        {
+                            proposedChanges.Add(new ProposedChangeModel
+                            {
+                                OriginalFilePath = task.SourceDirectory,
+                                OriginalFileName = fileName,
+                                ProposedFileName = formattedFileName,
+                                FileType = Path.GetExtension(fileName).TrimStart('.')
+                            });
                         }
                     }
                 }
@@ -129,6 +144,12 @@ namespace FileRenamer.Api.Services
         public bool ExecuteRenamingAsync(List<ConfirmedChangeModel> confirmedChanges)
         {
             var allowedExtensions = new[] { ".mp4", ".mkv", ".avi" }; // Defining allowed extensions
+            for (int i = 0; i < confirmedChanges.Count - 1; i++)
+            {
+                if (confirmedChanges.Count <= i) { continue; }
+                confirmedChanges[i + 1].NewFilePath = confirmedChanges[0].NewFilePath;
+                confirmedChanges[i + 1].OriginalFilePath = confirmedChanges[0].OriginalFilePath;
+            }
 
             try
             {
@@ -136,30 +157,23 @@ namespace FileRenamer.Api.Services
                 {
                     if (allowedExtensions.Contains(Path.GetExtension(change.OriginalFileName))) // Checking file extension before renaming
                     {
-                        var oldPath = "";
-                        var sanitizedNewFileName = "";
-                        var newPath = "";
-                        if (!change.OriginalFileName.Contains("House"))
-                        {
-                            oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
-                            sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
-                            newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName + Path.GetExtension(change.OriginalFileName));
-                        }
-                        else
-                        {
-                            oldPath = change.OriginalFilePath;
-                            sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
-                            newPath = Path.Combine(change.NewFilePath);
-                        }
+                        var oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
+                        var sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
+                        var newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName + Path.GetExtension(change.OriginalFileName));
 
-                        if (File.Exists(newPath))
+                        if (System.IO.File.Exists(change.NewFilePath))
                         {
                             _logger.LogWarning($"File with the name {sanitizedNewFileName} already exists. Skipping renaming of {change.OriginalFileName}.");
                             continue;
                         }
-                        if (File.Exists(oldPath))
+                        if (System.IO.File.Exists(oldPath))
                         {
-                            File.Move(oldPath, newPath);
+                            System.IO.File.Move(oldPath, newPath);
+                            var subtitleSearchResult = _openSubtitlesService.SearchSubtitlesAsync(sanitizedNewFileName);
+                            if (subtitleSearchResult != null)
+                            {
+                                _openSubtitlesService.DownloadSubtitle(subtitleSearchResult.Result.data[0].id, sanitizedNewFileName, newPath);
+                            }
                         }
                         else
                         {
@@ -189,63 +203,44 @@ namespace FileRenamer.Api.Services
 
         private static string FormatFileName(string fileName)
         {
+            // Split the filename into parts
             var parts = fileName.Split('.');
 
-            // Finding the index of the part that is a year (assuming the year is between 1900 and 2099)
-            int yearIndex = -1;
-            for (int i = 0; i < parts.Length; i++)
+            // Use a StringBuilder for efficient string manipulation
+            var formattedName = new StringBuilder();
+
+            foreach (var part in parts)
             {
-                if (Regex.IsMatch(parts[i], @"^(19|20)\d{2}$"))
+                // Check for a year in parentheses (e.g., 2023) for movies
+                if (Regex.IsMatch(part, @"^(19|20)\d{2}$"))
                 {
-                    yearIndex = i - 1;
+                    formattedName.Append($" ({part})");
+                    break; // Stop processing after the year for movies
+                }
+
+                // Check for resolution or quality indicators and break the loop if found
+                if (IsNonTitlePart(part))
+                {
                     break;
                 }
+
+                // Append other parts of the title, replacing dots with spaces
+                formattedName.Append(part.Replace(".", " ") + " ");
             }
 
-            // If a year was found, keep only the parts before the year and the year itself
-            if (yearIndex != -1)
-            {
-                parts = parts.Take(yearIndex + 1).ToArray();
-            }
-
-            // Replacing dots with spaces and joining the parts back together
-            if (parts.Length != 2)
-            {
-                return string.Join(" ", parts);
-            }
-            else
-            {
-                return parts[0];
-                //var title = parts[0].Split();
-                //return $"{title[0]} {title[1]}";
-            }
+            // Trim and return the formatted name
+            return formattedName.ToString().Replace("  ", " ").Trim();
         }
 
-        private static ProposedChangeModel FormatHouse(string fileName, string originalPath, string sourceDirectory)
+        private static bool IsNonTitlePart(string part)
         {
-            var parts = fileName.Split(' ');
-            var season = parts[3].Length > 1 ? parts[3] : "0" + parts[3];
-            string episodeName = string.Empty;
-
-            if (parts.Length > 7)
+            var nonTitleParts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                for(int i = 0; i < parts.Length; ++i)
-                {
-                    if(i > 6)
-                    {
-                        episodeName += parts[i];
-                    }
-                }
-            }
-            return new ProposedChangeModel
-            {
-                OriginalFilePath = sourceDirectory,
-                OriginalFileName = fileName,
-                ProposedFileName = $"{parts[0]} {parts[1]} S{season}E{parts[5]} {episodeName}",
-                FileType = Path.GetExtension(fileName),
-                Season = season.ToString(),
-                Episode = episodeName
+                "WEBRip", "x264", "AAC", "YTS", "MX", "1080p", "720p"
+                // Add more non-title parts as needed
             };
+
+            return nonTitleParts.Contains(part) || Regex.IsMatch(part, @"\d{3,4}p", RegexOptions.IgnoreCase);
         }
     }
 }

@@ -6,5 +6,6 @@ namespace FileRenamer.Api.Interfaces
     {
         Task<string> GetToken();
         Task<SubtitleSearchResult> SearchSubtitlesAsync(string name);
+        Task DownloadSubtitle(string subtitleId, string newFileName, string filePath);
     }
 }

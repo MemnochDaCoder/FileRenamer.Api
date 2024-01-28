@@ -20,11 +20,11 @@ namespace FileRenamer.Api.Services
             _configuration = config;
         }
 
-        public async Task<string> GetToken()
+        public async Task<string> GetTvDbToken()
         {
-            var apiKey = _configuration["API:ApiKey"];
-            var pin = _configuration["API:Pin"];
-            var loginUrl = _configuration["API:BaseUrl"] + _configuration["API:LoginUrl"];
+            var apiKey = _configuration["TvDb:ApiKey"];
+            var pin = _configuration["TvDb:Pin"];
+            var loginUrl = _configuration["TvDb:BaseUrl"] + _configuration["TvDb:LoginUrl"];
 
             var loginContent = new StringContent(JsonConvert.SerializeObject(new { apiKey, pin }), Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync(loginUrl, loginContent);
@@ -32,7 +32,7 @@ namespace FileRenamer.Api.Services
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                var tokenResponse = JsonConvert.DeserializeObject<TokenResponse>(responseContent) ?? throw new ArgumentException("JsonConvert returned null when trying to deserialize the token response.");
+                var tokenResponse = JsonConvert.DeserializeObject<TvDbTokenResponse>(responseContent) ?? throw new ArgumentException("JsonConvert returned null when trying to deserialize the token response.");
                 token = tokenResponse.Data.Token;
                 return token;
             }
@@ -50,7 +50,7 @@ namespace FileRenamer.Api.Services
             {
                 try
                 {
-                    await GetToken();
+                    await GetTvDbToken();
                 }
                 catch (Exception ex)
                 {
@@ -58,22 +58,39 @@ namespace FileRenamer.Api.Services
                     return null!;
                 }
             }
-                
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            var response = await _httpClient.GetAsync($"https://api4.thetvdb.com/v4/search?query={query}");
-            var content = await response.Content.ReadAsStringAsync();
-            var returnModel = JsonConvert.DeserializeObject<TvDbResponse>(content) ?? throw new ArgumentNullException("The search result returned no data.");
 
-            return returnModel;
+            var fullUrlEndpoint = query.Contains("The Big Bang Theory") ? $"https://api4.thetvdb.com/v4/series/80379/episodes/default?page=0&season={query.Substring(22, 1)}&episodeNumber={query.Substring(25, 1)}" : $"{_configuration["TvDb:BaseUrl"]}/search?query={query}";
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var response = await _httpClient.GetAsync(fullUrlEndpoint);
+            var content = await response.Content.ReadAsStringAsync();
+
+            try
+            {
+                if (fullUrlEndpoint.Contains("season="))
+                {
+                    var test = JsonConvert.DeserializeObject(content);
+                    var bbReturnModel = JsonConvert.DeserializeObject<SimplifiedTvDbResponse>(content) ?? throw new ArgumentNullException("The search result returned no data.");
+                    var newResponse = MapToResponse(bbReturnModel);
+                    return newResponse;
+                }
+
+                var returnModel = JsonConvert.DeserializeObject<TvDbResponse>(content) ?? throw new ArgumentNullException("The search result returned no data.");
+                return returnModel;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+                return null!;
+            }
         }
 
         public async Task<Root> GetEpisodeDetailsAsync(int id, string season, string episode)
         {
             _logger.LogInformation($"Started a episode search: {id}");
             if (token == null)
-                await GetToken();
+                await GetTvDbToken();
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            var response = await _httpClient.GetAsync($"https://api4.thetvdb.com/v4/series/{id}/episodes/default?page=1&season={int.Parse(season).ToString()}&episodeNumber={int.Parse(episode).ToString()}");
+            var response = await _httpClient.GetAsync($"{_configuration["TvDb:BaseUrl"]}/series/{id}/episodes/default?page=1&season={int.Parse(season)}&episodeNumber={int.Parse(episode)}");
             var content = await response.Content.ReadAsStringAsync();
             return JsonConvert.DeserializeObject<Root>(content) ?? throw new ArgumentNullException("The search result returned no data for episodes.");
         }
@@ -81,15 +98,35 @@ namespace FileRenamer.Api.Services
         public async Task<MovieDetailModel> GetMovieDetailsAsync(int id)
         {
             if (token == null)
-                await GetToken();
+                await GetTvDbToken();
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            var response = await _httpClient.GetAsync($"https://api4.thetvdb.com/v4/movies/{id}");
+            var response = await _httpClient.GetAsync($"{_configuration["TvDb:BaseUrl"]}/movies/{id}");
             var content = await response.Content.ReadAsStringAsync();
             return JsonConvert.DeserializeObject<MovieDetailModel>(content) ?? throw new ArgumentNullException("The search result returned no data for movies.");
         }
+
+        private TvDbResponse MapToResponse(SimplifiedTvDbResponse otherModel)
+        {
+            if (otherModel?.Data == null)
+                return null!;
+
+            return new TvDbResponse
+            {
+                Data = new List<TvDbData> {
+                    new TvDbData() {
+                        ObjectID = otherModel.Data.Episodes[0].ObjectId.ToString(),
+                        Name = otherModel.Data.Episodes[0].Name,
+                        Id = otherModel.Data.Series.Id.ToString(),
+                        Type = "series",
+                        ImageUrl = otherModel.Data.Series.ImageUrl,
+                        Year = otherModel.Data.Series.Year
+                    }
+                }
+            };
+        }
     }
 
-    public class TokenResponse
+    public class TvDbTokenResponse
     {
         public required string Status { get; set; }
         public required TokenData Data { get; set; }
