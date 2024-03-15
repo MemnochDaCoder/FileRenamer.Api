@@ -1,8 +1,8 @@
-﻿using Newtonsoft.Json;
-using System.Text;
-using FileRenamer.Api.Interfaces;
+﻿using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Models;
+using Newtonsoft.Json;
 using System.Net.Http.Headers;
+using System.Text;
 
 namespace FileRenamer.Api.Services
 {
@@ -70,7 +70,7 @@ namespace FileRenamer.Api.Services
             if (token == null)
                 await GetToken();
 
-            if(title == null)
+            if (title == null)
             {
                 return null!;
             }

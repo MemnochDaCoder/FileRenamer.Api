@@ -43,7 +43,6 @@ namespace FileRenamer.Api.Services
 
                     if (formattedFileName != null)
                     {
-
                         var deconstructedFileName = formattedFileName.Split(' ');
 
                         if (deconstructedFileName.Length == 2)
@@ -205,7 +204,10 @@ namespace FileRenamer.Api.Services
         {
             // Split the filename into parts
             var parts = fileName.Split('.');
-
+            if (parts.Length < 3)
+            {
+                parts = fileName.Split(' ');
+            }
             // Use a StringBuilder for efficient string manipulation
             var formattedName = new StringBuilder();
 

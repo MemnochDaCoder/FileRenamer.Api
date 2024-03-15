@@ -40,7 +40,7 @@ namespace FileRenamer.Api.Controllers
             {
                 return BadRequest("Source directory is required.");
             }
-            if(string.IsNullOrEmpty(destinationDirectory))
+            if (string.IsNullOrEmpty(destinationDirectory))
             {
                 return BadRequest("Destination directory is required.");
             }
