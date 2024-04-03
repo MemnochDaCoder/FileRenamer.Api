@@ -38,4 +38,17 @@ namespace FileRenamer.Api.Models
         [JsonProperty("data")]
         public List<TvDbData> Data { get; set; }
     }
+
+    public class TvDbEpisodeResponse
+    {
+        public List<EpisodeData> Data { get; set; }
+    }
+
+    public class EpisodeData
+    {
+        public int Id { get; set; }
+        public int AiredSeason { get; set; }
+        public int AiredEpisodeNumber { get; set; }
+        public string EpisodeName { get; set; }
+    }
 }

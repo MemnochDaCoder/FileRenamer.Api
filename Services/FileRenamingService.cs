@@ -50,7 +50,7 @@ namespace FileRenamer.Api.Services
                             formattedFileName = deconstructedFileName[0];
                         }
 
-                        var apiData = await _tvDbService.SearchShowsOrMoviesAsync(formattedFileName);
+                        var apiData = await _tvDbService.SearchShowsAndFetchEpisodeAsync(formattedFileName);
 
                         if (apiData != null && apiData.Data != null && apiData.Data.Count > 0)
                         {
@@ -79,7 +79,7 @@ namespace FileRenamer.Api.Services
                                 //Shows
                                 _logger.LogInformation("Started renaming episode.");
 
-                                var pattern = @"S(\d{2})E(\d{2})|(\d{1})x(\d{2})";
+                                var pattern = @"S(\d{2})E(\d{2})|s(\d{2})e(\d{2})|(\d{1})x(\d{2})";
                                 Match match = Regex.Match(deconstructedFileName[1], pattern);
 
                                 string? filePath = null;
@@ -95,8 +95,9 @@ namespace FileRenamer.Api.Services
 
                                 if (match.Success)
                                 {
-                                    var season = int.Parse(match.Groups[1].Value);
-                                    var episode = int.Parse(match.Groups[2].Value);
+                                    var s = FindAndParseTwoIntegers(match.Groups);
+                                    var season = s.firstInt;
+                                    var episode = s.secondInt;
                                     var episodeDetail = await _tvDbService.GetEpisodeDetailsAsync(int.Parse(apiData.Data[0].Id), season.ToString(), episode.ToString());
                                     var ss = episodeDetail.Data.Episodes[0].SeasonNumber.ToString().Length == 1 ? "S0" : "S";
                                     var ee = episodeDetail.Data.Episodes[0].Number.ToString().Length == 1 ? "E0" : "E";
@@ -121,6 +122,19 @@ namespace FileRenamer.Api.Services
                         }
                         else
                         {
+                            var split = formattedFileName.Split(' ');
+                            formattedFileName = "";
+
+                            for(int i = 0; i < split.Length; i++)
+                            {
+                                if (split[i] != "mp4" && split[i] != "avi" && split[i] != "mkv")
+                                {
+                                        formattedFileName += split[i] + " ";
+                                }
+                            }
+
+                            formattedFileName = formattedFileName.Trim();
+
                             proposedChanges.Add(new ProposedChangeModel
                             {
                                 OriginalFilePath = task.SourceDirectory,
@@ -146,7 +160,7 @@ namespace FileRenamer.Api.Services
             for (int i = 0; i < confirmedChanges.Count - 1; i++)
             {
                 if (confirmedChanges.Count <= i) { continue; }
-                confirmedChanges[i + 1].NewFilePath = confirmedChanges[0].NewFilePath;
+                confirmedChanges[i + 1].NewFilePath = $@"{confirmedChanges[0].NewFilePath}";
                 confirmedChanges[i + 1].OriginalFilePath = confirmedChanges[0].OriginalFilePath;
             }
 
@@ -165,14 +179,14 @@ namespace FileRenamer.Api.Services
                             _logger.LogWarning($"File with the name {sanitizedNewFileName} already exists. Skipping renaming of {change.OriginalFileName}.");
                             continue;
                         }
-                        if (System.IO.File.Exists(oldPath))
+                        if (System.IO.File.Exists(oldPath) && Directory.Exists($@"{confirmedChanges[0].NewFilePath}\"))
                         {
                             System.IO.File.Move(oldPath, newPath);
-                            var subtitleSearchResult = _openSubtitlesService.SearchSubtitlesAsync(sanitizedNewFileName);
-                            if (subtitleSearchResult != null)
-                            {
-                                _openSubtitlesService.DownloadSubtitle(subtitleSearchResult.Result.data[0].id, sanitizedNewFileName, newPath);
-                            }
+                            //var subtitleSearchResult = _openSubtitlesService.SearchSubtitlesAsync(sanitizedNewFileName);
+                            //if (subtitleSearchResult != null)
+                            //{
+                            //    _openSubtitlesService.DownloadSubtitle(subtitleSearchResult.Result.data[0].id, sanitizedNewFileName, newPath);
+                            //}
                         }
                         else
                         {
@@ -207,6 +221,11 @@ namespace FileRenamer.Api.Services
             if (parts.Length < 3)
             {
                 parts = fileName.Split(' ');
+
+                for(int i = 0; i < parts.Length; i++)
+                {
+                    parts[i] = RemoveExtensions(parts[i]);
+                }
             }
             // Use a StringBuilder for efficient string manipulation
             var formattedName = new StringBuilder();
@@ -238,11 +257,48 @@ namespace FileRenamer.Api.Services
         {
             var nonTitleParts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "WEBRip", "x264", "AAC", "YTS", "MX", "1080p", "720p"
+                "WEBRip", "x264", "AAC", "YTS", "MX", "1080p", "720p", "mp4", "avi", "mkv"
                 // Add more non-title parts as needed
             };
 
             return nonTitleParts.Contains(part) || Regex.IsMatch(part, @"\d{3,4}p", RegexOptions.IgnoreCase);
+        }
+
+        private (int? firstInt, int? secondInt) FindAndParseTwoIntegers(GroupCollection groups)
+        {
+            int? firstInt = null;
+            int? secondInt = null;
+
+            // Assuming groups[0] is the entire match, start from groups[1]
+            for (int i = 1; i < groups.Count; i++)
+            {
+                if (int.TryParse(groups[i].Value, out int result))
+                {
+                    if (firstInt == null)
+                    {
+                        firstInt = result;
+                    }
+                    else
+                    {
+                        secondInt = result;
+                        break; // Exit after finding the second integer
+                    }
+                }
+            }
+
+            return (firstInt, secondInt);
+        }
+
+        private static string RemoveExtensions(string s)
+        {
+            var removalList = new string[] { ".mp4", ".avi", ".mkv" };
+
+            foreach(var r in removalList)
+            {
+                s = s.Replace(r, "");
+            }
+
+            return s;
         }
     }
 }
