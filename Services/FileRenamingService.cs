@@ -1,6 +1,7 @@
 ﻿
 using FileRenamer.Api.Interfaces;
 using FileRenamer.Api.Models;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -26,132 +27,111 @@ namespace FileRenamer.Api.Services
 
             try
             {
-                if (!Directory.Exists(task.SourceDirectory) && !Directory.Exists(task.DestinationDirectory))
+                if (!Directory.Exists(task.SourceDirectory) || !Directory.Exists(task.DestinationDirectory))
                 {
                     _logger.LogError($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                     throw new DirectoryNotFoundException($"The source: {task.SourceDirectory} or destination: {task.DestinationDirectory} did not exist.");
                 }
+
                 var files = Directory.GetFiles(task.SourceDirectory)
-                    .Where(file => allowedExtensions.Contains(Path.GetExtension(file)))
+                    .Where(file => allowedExtensions.Contains(Path.GetExtension(file).ToLowerInvariant()))
                     .ToList();
 
                 foreach (var file in files)
                 {
-                    var fileName = Path.GetFileName(file);
+                    var fileName = Path.GetFileNameWithoutExtension(file);
 
-                    var formattedFileName = FormatFileName(fileName);
+                    // Replace dots with spaces for consistent formatting
+                    fileName = fileName.Replace(".", " ");
 
-                    if (formattedFileName != null)
+                    var fileExtension = Path.GetExtension(file);
+
+                    // Use ConstructTitle to parse the filename and determine series or movie
+                    var (name, type) = await _tvDbService.ConstructTitle(fileName);
+
+                    // Check if the file is already in the correct 'SxxEyy' format
+                    var isFormattedCorrectly = Regex.IsMatch(name, @"s\d{2}e\d{2}", RegexOptions.IgnoreCase);
+
+                    // If the file is a series and already formatted correctly, skip TVDB lookup and add it directly
+                    if (type == "series" && isFormattedCorrectly)
                     {
-                        var deconstructedFileName = formattedFileName.Split(' ');
-
-                        if (deconstructedFileName.Length == 2)
+                        proposedChanges.Add(new ProposedChangeModel
                         {
-                            formattedFileName = deconstructedFileName[0];
-                        }
+                            OriginalFilePath = file,
+                            OriginalFileName = Path.GetFileName(file),
+                            ProposedFileName = $"{name}{fileExtension}", // Use the correctly formatted name
+                            FileType = type
+                        });
+                        continue; // Skip further processing and move to the next file
+                    }
 
-                        var apiData = await _tvDbService.SearchShowsAndFetchEpisodeAsync(formattedFileName);
+                    // If the name is not correctly formatted, fetch the TVDB ID for the series
+                    if (type == "series")
+                    {
+                        var (tvDbId, isSeries) = await _tvDbService.GetTvdbIdAsync(name, type);
 
-                        if (apiData != null && apiData.Data != null && apiData.Data.Count > 0)
+                        if (isSeries)
                         {
-                            if (files.Count == 0)
-                            {
-                                _logger.LogError("No files were found in the source directory.");
-                                throw new ArgumentException("No files were found in the source directory.");
-                            }
-                            else if (files.Count == 1)
-                            {
-                                //Movies
-                                _logger.LogInformation("Started renaming a movie.");
+                            // Extract season and episode numbers from 'SxxEyy' format
+                            var match = Regex.Match(fileName, @"s(\d{2})e(\d{2})", RegexOptions.IgnoreCase);
 
-                                var movieDetail = await _tvDbService.GetMovieDetailsAsync(int.Parse(apiData.Data[0].Id));
+                            if (match.Success)
+                            {
+                                var season = int.Parse(match.Groups[1].Value);
+                                var episode = int.Parse(match.Groups[2].Value);
 
-                                proposedChanges.Add(new ProposedChangeModel
+                                // Get episode details from TVDB
+                                var seriesDetailData = await _tvDbService.GetEpisodeDetailsAsync(int.Parse(tvDbId.Split('-')[1]), season.ToString(), episode.ToString());
+
+                                if (seriesDetailData != null && seriesDetailData.Data.Episodes != null)
                                 {
-                                    OriginalFilePath = task.SourceDirectory,
-                                    OriginalFileName = fileName,
-                                    ProposedFileName = $"{SanitizeFileName($"{movieDetail?.Data?.Name} ({movieDetail?.Data?.Year})")}",
-                                    FileType = deconstructedFileName[deconstructedFileName.Length - 1]
-                                });
-                            }
-                            else
-                            {
-                                //Shows
-                                _logger.LogInformation("Started renaming episode.");
+                                    var episodeDetail = seriesDetailData.Data.Episodes.FirstOrDefault(e => e.SeasonNumber == season && e.Number == episode);
 
-                                var pattern = @"S(\d{2})E(\d{2})|s(\d{2})e(\d{2})|(\d{1})x(\d{2})";
-                                Match match = Regex.Match(deconstructedFileName[1], pattern);
-
-                                string? filePath = null;
-
-                                foreach (var d in deconstructedFileName.Select((value, i) => new { i, value }))
-                                {
-                                    filePath += d.i != deconstructedFileName.Length ? $" {d.value}" : "";
-                                    if (!match.Success)
+                                    if (episodeDetail != null)
                                     {
-                                        match = Regex.Match(d.value, pattern);
+                                        var proposedFileName = $"{seriesDetailData.Data.Series.Name} S{season:D2}E{episode:D2} {episodeDetail.Name}{fileExtension}";
+
+                                        proposedChanges.Add(new ProposedChangeModel
+                                        {
+                                            OriginalFilePath = file,
+                                            OriginalFileName = Path.GetFileName(file),
+                                            ProposedFileName = proposedFileName,
+                                            FileType = type
+                                        });
                                     }
                                 }
-
-                                if (match.Success)
-                                {
-                                    var s = FindAndParseTwoIntegers(match.Groups);
-                                    var season = s.firstInt;
-                                    var episode = s.secondInt;
-                                    var episodeDetail = await _tvDbService.GetEpisodeDetailsAsync(int.Parse(apiData.Data[0].Id), season.ToString(), episode.ToString());
-                                    var ss = episodeDetail.Data.Episodes[0].SeasonNumber.ToString().Length == 1 ? "S0" : "S";
-                                    var ee = episodeDetail.Data.Episodes[0].Number.ToString().Length == 1 ? "E0" : "E";
-                                    var proposedFileName = SanitizeFileName($"{episodeDetail.Data.Series.Name} {ss + episodeDetail.Data.Episodes[0].SeasonNumber}{ee + episodeDetail.Data.Episodes[0].Number} {episodeDetail.Data.Episodes[0].Name}");
-
-                                    proposedChanges.Add(new ProposedChangeModel
-                                    {
-                                        OriginalFilePath = task.SourceDirectory,
-                                        OriginalFileName = fileName,
-                                        ProposedFileName = proposedFileName,
-                                        FileType = deconstructedFileName[deconstructedFileName.Length - 1],
-                                        Season = season.ToString(),
-                                        Episode = episode.ToString()
-                                    });
-                                }
-                                else
-                                {
-                                    _logger.LogError("No match was found using the regex for season and episode.");
-                                    throw new Exception("No match was found using the regex for season and episode.");
-                                }
                             }
                         }
-                        else
+                    }
+                    else if (type == "movie")
+                    {
+                        // Handle movies
+                        var (tvDbId, _) = await _tvDbService.GetTvdbIdAsync(name, type);
+                        var movieDetails = await _tvDbService.GetMovieDetailsAsync(int.Parse(tvDbId));
+
+                        if (movieDetails != null && movieDetails.Data != null)
                         {
-                            var split = formattedFileName.Split(' ');
-                            formattedFileName = "";
-
-                            for(int i = 0; i < split.Length; i++)
-                            {
-                                if (split[i] != "mp4" && split[i] != "avi" && split[i] != "mkv")
-                                {
-                                        formattedFileName += split[i] + " ";
-                                }
-                            }
-
-                            formattedFileName = formattedFileName.Trim();
+                            var proposedFileName = $"{movieDetails.Data.Name} ({movieDetails.Data.Year}){fileExtension}";
 
                             proposedChanges.Add(new ProposedChangeModel
                             {
-                                OriginalFilePath = task.SourceDirectory,
-                                OriginalFileName = fileName,
-                                ProposedFileName = formattedFileName,
-                                FileType = Path.GetExtension(fileName).TrimStart('.')
+                                OriginalFilePath = file,
+                                OriginalFileName = file,
+                                ProposedFileName = proposedFileName,
+                                FileType = type,
+                                Season = null,
+                                Episode = null
                             });
                         }
                     }
                 }
-                return proposedChanges;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error proposing changes.");
-                return proposedChanges;
             }
+
+            return proposedChanges;
         }
 
         public bool ExecuteRenamingAsync(List<ConfirmedChangeModel> confirmedChanges)
@@ -168,11 +148,13 @@ namespace FileRenamer.Api.Services
             {
                 foreach (var change in confirmedChanges)
                 {
+                    change.NewFilePath = change.NewFilePath.Replace("U:\\", "\\\\10.0.0.164\\storage\\");
+
                     if (allowedExtensions.Contains(Path.GetExtension(change.OriginalFileName))) // Checking file extension before renaming
                     {
                         var oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
                         var sanitizedNewFileName = SanitizeFileName(change.NewFileName); // Sanitizing the new filename
-                        var newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName + Path.GetExtension(change.OriginalFileName));
+                        var newPath = Path.Combine(change.NewFilePath, sanitizedNewFileName);
 
                         if (System.IO.File.Exists(change.NewFilePath))
                         {
@@ -181,12 +163,26 @@ namespace FileRenamer.Api.Services
                         }
                         if (System.IO.File.Exists(oldPath) && Directory.Exists($@"{confirmedChanges[0].NewFilePath}\"))
                         {
+                            // Move the file
                             System.IO.File.Move(oldPath, newPath);
-                            //var subtitleSearchResult = _openSubtitlesService.SearchSubtitlesAsync(sanitizedNewFileName);
-                            //if (subtitleSearchResult != null)
-                            //{
-                            //    _openSubtitlesService.DownloadSubtitle(subtitleSearchResult.Result.data[0].id, sanitizedNewFileName, newPath);
-                            //}
+
+                            // Check if an existing .srt file is present
+                            var oldSrtPath = Path.ChangeExtension(oldPath, ".srt");
+                            var newSrtPath = Path.ChangeExtension(newPath, ".srt");
+
+                            if (System.IO.File.Exists(oldSrtPath))
+                            {
+                                // Rename and move the existing .srt file to match the new .mkv filename
+                                System.IO.File.Move(oldSrtPath, newSrtPath);
+                                _logger.LogInformation($"Renamed and moved existing .srt file from {oldSrtPath} to {newSrtPath}.");
+                            }
+                            else if (Path.GetExtension(newPath).ToLower() == ".mkv")
+                            {
+                                // If no .srt file exists, attempt to extract subtitles
+                                newPath = newPath.Replace("\\\\\\\\10.0.0.164", "U:");
+                                newSrtPath = newSrtPath.Replace("\\\\\\\\10.0.0.164", "U:");
+                                ExtractEnglishSubtitles(newPath, newSrtPath); // Extract subtitles, ignore if none found
+                            }
                         }
                         else
                         {
@@ -222,7 +218,7 @@ namespace FileRenamer.Api.Services
             {
                 parts = fileName.Split(' ');
 
-                for(int i = 0; i < parts.Length; i++)
+                for (int i = 0; i < parts.Length; i++)
                 {
                     parts[i] = RemoveExtensions(parts[i]);
                 }
@@ -293,12 +289,97 @@ namespace FileRenamer.Api.Services
         {
             var removalList = new string[] { ".mp4", ".avi", ".mkv" };
 
-            foreach(var r in removalList)
+            foreach (var r in removalList)
             {
                 s = s.Replace(r, "");
             }
 
             return s;
+        }
+
+        private static string ExtractFileNameWithPath(string fullPath)
+        {
+            // Get the file name with extension
+            var fileName = Path.GetFileName(fullPath);
+
+            // Find the index of the last backslash
+            var lastBackslashIndex = fullPath.LastIndexOf(Path.DirectorySeparatorChar);
+
+            // Extract the part of the path from the last backslash to the end
+            var pathSection = fullPath.Substring(lastBackslashIndex + 1);
+
+            return pathSection;
+        }
+
+        public void ExtractEnglishSubtitles(string mkvFilePath, string srtFilePath)
+        {
+            try
+            {
+                var mkvInfoPath = @"C:\Program Files\MKVToolNix\mkvinfo.exe"; // Full path to mkvinfo
+                var mkvExtractPath = @"C:\Program Files\MKVToolNix\mkvextract.exe"; // Full path to mkvextract
+
+                // Use local path (U:) instead of UNC path
+                string localMkvFilePath = mkvFilePath.Replace(@"\\10.0.0.164\storage", @"U:");
+                string localSrtFilePath = srtFilePath.Replace(@"\\10.0.0.164\storage", @"U:");
+
+                // Step 1: Use mkvinfo to inspect the file and get subtitle track numbers
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = mkvInfoPath,
+                    Arguments = $"\"{localMkvFilePath}\"", // Use local path
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                string mkvinfoOutput;
+                using (var process = Process.Start(startInfo))
+                {
+                    mkvinfoOutput = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                }
+
+                // Step 2: Parse mkvinfo output to find English subtitle tracks
+                var trackPattern = new Regex(@"\+ Track\s*\|\s*\+ Track number: (\d+).*?Track type: subtitles", RegexOptions.Singleline);
+                var languagePattern = new Regex(@"\+ Language: (\w{3})", RegexOptions.Singleline);
+                var matches = trackPattern.Matches(mkvinfoOutput);
+
+                var subtitleTracks = new List<(int trackId, bool isForced)>();
+
+                foreach (Match match in matches)
+                {
+                    int trackNumber = int.Parse(match.Groups[1].Value); // Get the track number
+                    bool isForced = !string.IsNullOrEmpty(match.Groups[2].Value); // Check if it's forced
+                    subtitleTracks.Add((trackNumber, isForced));
+                }
+
+                // Step 3: Extract the identified English subtitle tracks using mkvextract
+                foreach (var (trackId, isForced) in subtitleTracks)
+                {
+                    var subtitleOutputPath = isForced
+                        ? Path.ChangeExtension(localMkvFilePath, "forced.srt") // Save forced subtitles as forced.srt
+                        : localSrtFilePath; // Save regular subtitles as the same name as the file
+
+                    var extractStartInfo = new ProcessStartInfo
+                    {
+                        FileName = mkvExtractPath,
+                        Arguments = $"tracks \"{localMkvFilePath}\" {trackId - 1}:\"{subtitleOutputPath}\"", // Adjust the trackId for mkvextract
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using (var extractProcess = Process.Start(extractStartInfo))
+                    {
+                        extractProcess.WaitForExit();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Subtitle extraction failed for {mkvFilePath}: {ex.Message}");
+                // Safely continue without stopping the renaming process
+            }
         }
     }
 }

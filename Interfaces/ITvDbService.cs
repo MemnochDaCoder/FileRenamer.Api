@@ -8,5 +8,8 @@ namespace FileRenamer.Api.Interfaces
         Task<TvDbEpisodeResponse> SearchShowsAndFetchEpisodeAsync(string query);
         Task<Root> GetEpisodeDetailsAsync(int id, string season, string episode);
         Task<MovieDetailModel> GetMovieDetailsAsync(int id);
+        public Task<(string name, string type)> ConstructTitle(string incomingName);
+
+        Task<(string tvDbId, bool isSeries)> GetTvdbIdAsync(string query, string type);
     }
 }
