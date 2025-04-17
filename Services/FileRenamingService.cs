@@ -179,8 +179,6 @@ namespace FileRenamer.Api.Services
                             else if (Path.GetExtension(newPath).ToLower() == ".mkv")
                             {
                                 // If no .srt file exists, attempt to extract subtitles
-                                newPath = newPath.Replace("\\\\\\\\10.0.0.164", "U:");
-                                newSrtPath = newSrtPath.Replace("\\\\\\\\10.0.0.164", "U:");
                                 ExtractEnglishSubtitles(newPath, newSrtPath); // Extract subtitles, ignore if none found
                             }
                         }
