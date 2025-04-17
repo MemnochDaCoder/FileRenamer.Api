@@ -148,8 +148,6 @@ namespace FileRenamer.Api.Services
             {
                 foreach (var change in confirmedChanges)
                 {
-                    change.NewFilePath = change.NewFilePath.Replace("U:\\", "\\\\10.0.0.164\\storage\\");
-
                     if (allowedExtensions.Contains(Path.GetExtension(change.OriginalFileName))) // Checking file extension before renaming
                     {
                         var oldPath = Path.Combine(change.OriginalFilePath, change.OriginalFileName);
